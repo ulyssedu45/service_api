@@ -9,7 +9,7 @@
  */
 
 import fs from 'fs';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { ServiceStatus } from './types';
 
 // ─── Filesystem helpers ───────────────────────────────────────────────────────
@@ -150,8 +150,9 @@ function queryLibsystemd(serviceName: string): SystemdQueryResult {
 function querySystemctl(serviceName: string): SystemdQueryResult {
   const unit = serviceName.includes('.') ? serviceName : `${serviceName}.service`;
   try {
-    const output = execSync(
-      `systemctl show ${unit} --property=LoadState,ActiveState,SubState,MainPID --no-pager`,
+    const output = execFileSync(
+      'systemctl',
+      ['show', unit, '--property=LoadState,ActiveState,SubState,MainPID', '--no-pager'],
       { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
     );
     const props: Record<string, string> = {};

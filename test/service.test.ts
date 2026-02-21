@@ -70,7 +70,7 @@ async function withFullMock(
 ): Promise<void> {
   const origAccess   = fs.accessSync;
   const origReadFile = fs.readFileSync;
-  const origExecSync = child_process.execSync;
+  const origExecFileSync = child_process.execFileSync;
 
   fs.accessSync = (p: any) => {
     if (existsSet.has(String(p))) return;
@@ -85,9 +85,9 @@ async function withFullMock(
     err.code = 'ENOENT';
     throw err;
   };
-  (child_process as any).execSync = (_cmd: any, _opts?: any) => {
+  (child_process as any).execFileSync = (_file: any, _args?: any, _opts?: any) => {
     if (systemctlOutput === null) {
-      throw new Error('execSync mock: command not found');
+      throw new Error('execFileSync mock: command not found');
     }
     return systemctlOutput;
   };
@@ -97,7 +97,7 @@ async function withFullMock(
   } finally {
     fs.accessSync = origAccess;
     (fs as any).readFileSync = origReadFile;
-    (child_process as any).execSync = origExecSync;
+    (child_process as any).execFileSync = origExecFileSync;
   }
 }
 
