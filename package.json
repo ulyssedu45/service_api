@@ -1,0 +1,21 @@
+{
+  "name": "service_api",
+  "version": "1.0.0",
+  "description": "Node.js library to check Windows/Linux service existence and status using native Windows APIs",
+  "main": "lib/index.js",
+  "scripts": {
+    "install": "node-gyp rebuild || echo 'Native build skipped (non-Windows)'",
+    "build": "node-gyp rebuild",
+    "test": "node test/index.test.js"
+  },
+  "dependencies": {
+    "node-addon-api": "^7.0.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^10.0.0"
+  },
+  "os": ["win32", "linux"],
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
