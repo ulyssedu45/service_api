@@ -1,10 +1,13 @@
 {
   "name": "@ulyssedu45/service_api",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Cross-platform Node.js library to check Windows/Linux service existence and status via native OS APIs",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "test": "node --test test/service.test.js"
+    "build": "tsc",
+    "pretest": "npm run build",
+    "test": "node --test dist/test/service.test.js"
   },
   "repository": {
     "type": "git",
@@ -30,5 +33,9 @@
   "homepage": "https://github.com/ulyssedu45/service_api#readme",
   "dependencies": {
     "koffi": "^2.15.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "typescript": "^5.9.3"
   }
 }
