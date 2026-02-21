@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * service_api — usage examples
@@ -11,13 +11,14 @@
  *   node examples/check-service.js <serviceName>
  */
 
-const { serviceExists, getServiceStatus } = require('..');
+const { serviceExists, getServiceStatus } = require("..");
 
 // Pick a sensible default service name for each OS so the demo works
 // out-of-the-box. You can override it by passing a CLI argument.
-const DEFAULT_SERVICE = process.platform === 'win32'
-  ? 'wuauserv'  // Windows Update (present on every Windows installation)
-  : 'cron';     // cron daemon (present on most Linux distributions)
+const DEFAULT_SERVICE =
+  process.platform === "win32"
+    ? "wuauserv" // Windows Update (present on every Windows installation)
+    : "cron"; // cron daemon (present on most Linux distributions)
 
 const serviceName = process.argv[2] || DEFAULT_SERVICE;
 
@@ -40,25 +41,25 @@ async function main() {
   const status = await getServiceStatus(serviceName);
 
   console.log(`State    : ${status.state}`);
-  console.log(`PID      : ${status.pid || '(not running)'}`);
+  console.log(`PID      : ${status.pid || "(not running)"}`);
   console.log(`Raw code : ${status.rawCode}`);
 
   // ── 3. React to state ─────────────────────────────────────────────────────
   //    Use the normalized state strings — no OS-specific values needed.
   switch (status.state) {
-    case 'RUNNING':
+    case "RUNNING":
       console.log(`\n✔  "${serviceName}" is running (PID ${status.pid}).`);
       break;
-    case 'STOPPED':
+    case "STOPPED":
       console.log(`\n✖  "${serviceName}" is stopped.`);
       break;
-    case 'START_PENDING':
-    case 'STOP_PENDING':
-    case 'CONTINUE_PENDING':
-    case 'PAUSE_PENDING':
+    case "START_PENDING":
+    case "STOP_PENDING":
+    case "CONTINUE_PENDING":
+    case "PAUSE_PENDING":
       console.log(`\n⏳ "${serviceName}" is transitioning (${status.state}).`);
       break;
-    case 'PAUSED':
+    case "PAUSED":
       console.log(`\n⏸  "${serviceName}" is paused.`);
       break;
     default:
@@ -66,7 +67,7 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error('Error:', err.message);
+main().catch((err) => {
+  console.error("Error:", err.message);
   process.exit(1);
 });

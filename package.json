@@ -1,5 +1,5 @@
 {
-  "name": "service_api",
+  "name": "@ulyssedu45/service_api",
   "version": "1.0.0",
   "description": "Cross-platform Node.js library to check Windows/Linux service existence and status via native OS APIs",
   "main": "index.js",
