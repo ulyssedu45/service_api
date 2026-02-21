@@ -1,15 +1,13 @@
 {
   "name": "@ulyssedu45/service_api",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Cross-platform Node.js library to check Windows/Linux service existence and status via native OS APIs",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "files": [
-    "dist/"
-  ],
+  "main": "index.js",
+  "types": "index.d.ts",
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "npm run build",
+    "postbuild": "node scripts/prepare-dist.js",
+    "release": "npm run build && npm publish ./dist --access=public",
     "pretest": "npm run build",
     "test": "node --test dist/test/service.test.js"
   },
