@@ -4,10 +4,10 @@ Cross-platform Node.js library to **check the existence and status of OS service
 
 **The same code runs unchanged on Windows and Linux** — the library selects the correct OS backend automatically. No `if (platform === 'win32')` guards are needed in your application.
 
-| Platform    | Backend                                                                                                                                             |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Windows** | `advapi32.dll` — calls the Windows Service Control Manager (SCM) directly via [koffi](https://koffi.dev/) FFI bindings. No PowerShell, no `sc.exe`. |
-| **Linux**   | `systemctl` (systemd), with a fallback to the legacy SysV `service` command.                                                                        |
+| Platform    | Backend                                                                                                                                                        |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Windows** | `advapi32.dll` — calls the Windows Service Control Manager (SCM) directly via [koffi](https://koffi.dev/) FFI bindings. No PowerShell, no `sc.exe`.            |
+| **Linux**   | Auto-detected native backend — **zero `child_process`**, zero fork. See table below.                                                                           |
 
 ---
 
@@ -49,7 +49,7 @@ console.log(status);
 | Platform | Name to use                            | Examples                             |
 | -------- | -------------------------------------- | ------------------------------------ |
 | Windows  | Short service name                     | `"wuauserv"`, `"spooler"`, `"W3SVC"` |
-| Linux    | systemd unit name (without `.service`) | `"nginx"`, `"sshd"`, `"cron"`        |
+| Linux    | Service unit name (without `.service` for systemd) | `"nginx"`, `"sshd"`, `"cron"` |
 
 ---
 
@@ -143,17 +143,50 @@ Returns a `ServiceStatus` object:
 
 ### State values
 
-| `state`            | Linux (ActiveState)   | Windows (dwCurrentState) |
-| ------------------ | --------------------- | ------------------------ |
-| `RUNNING`          | `active`              | `4` (SERVICE_RUNNING)    |
-| `STOPPED`          | `inactive` / `failed` | `1` (SERVICE_STOPPED)    |
-| `START_PENDING`    | `activating`          | `2`                      |
-| `STOP_PENDING`     | `deactivating`        | `3`                      |
-| `CONTINUE_PENDING` | `reloading`           | `5`                      |
-| `PAUSE_PENDING`    | —                     | `6`                      |
-| `PAUSED`           | —                     | `7`                      |
+| `state`            | systemd (ActiveState) | OpenRC                      | Windows (dwCurrentState) |
+| ------------------ | --------------------- | --------------------------- | ------------------------ |
+| `RUNNING`          | `active`              | started                     | `4` (SERVICE_RUNNING)    |
+| `STOPPED`          | `inactive` / `failed` | not started                 | `1` (SERVICE_STOPPED)    |
+| `START_PENDING`    | `activating`          | starting                    | `2`                      |
+| `STOP_PENDING`     | `deactivating`        | stopping                    | `3`                      |
+| `CONTINUE_PENDING` | `reloading`           | —                           | `5`                      |
+| `PAUSE_PENDING`    | —                     | —                           | `6`                      |
+| `PAUSED`           | —                     | —                           | `7`                      |
 
 ---
+
+## How it works on Linux
+
+The Linux backend is selected automatically at runtime — **no `child_process`, no `systemctl`, no fork** of any kind.
+
+| Init system | Distros                                    | Detection                         | API used                                   |
+| ----------- | ------------------------------------------ | ---------------------------------- | ------------------------------------------ |
+| **systemd** | Ubuntu, Debian, Fedora, RHEL, Arch, SUSE… | `/run/systemd/private` exists      | `libsystemd.so.0` via koffi (sd_bus D-Bus) |
+| **OpenRC**  | Alpine, Gentoo, Artix…                     | `/run/openrc/softlevel` exists     | `/run/openrc/started/` filesystem reads    |
+| **SysV**    | legacy Debian, RHEL 6, embedded…           | `/etc/init.d/` exists              | `/etc/init.d/` + `/proc/<pid>` reads       |
+
+### systemd backend (koffi + libsystemd)
+
+Uses [koffi](https://koffi.dev/) to call `libsystemd.so.0` directly — the same library that `systemctl` uses internally:
+
+1. **`sd_bus_open_system`** — opens a connection to the D-Bus system bus.
+2. **`sd_bus_get_property_string`** — reads `LoadState`, `ActiveState`, `SubState`, `MainPID` from the `org.freedesktop.systemd1.Unit` D-Bus interface.
+3. **`sd_bus_unref`** — releases the bus connection.
+
+If `libsystemd.so.0` is not available (containers, musl builds without systemd), the backend falls back silently to SysV-style checks via `/proc`.
+
+### OpenRC backend (Alpine, Gentoo)
+
+Pure filesystem reads — no library, no binary:
+
+- **Existence**: `/etc/init.d/<name>` present
+- **State**: `/run/openrc/started/<name>` → `RUNNING` · `/run/openrc/starting/<name>` → `START_PENDING` · `/run/openrc/stopping/<name>` → `STOP_PENDING`
+- **PID**: `/run/<name>.pid` or `/var/run/<name>.pid`
+
+### SysV backend (legacy systems)
+
+- **Existence**: `/etc/init.d/<name>` present
+- **Running**: PID file read + `/proc/<pid>` existence check
 
 ## How it works on Windows
 

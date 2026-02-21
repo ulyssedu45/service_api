@@ -2,203 +2,310 @@
 
 /**
  * Tests for the Linux implementation (src/linux.ts).
- * These tests mock child_process.execFile and fs.promises.access to avoid
- * requiring a real system service manager.
+ * Mocks fs.accessSync and fs.readFileSync to avoid requiring a real init system.
  */
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
+import fs from 'fs';
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-describe('Linux implementation — serviceExists', () => {
-  it('returns true for an existing systemd service', async () => {
-    const cp = require('child_process');
-    const orig = cp.execFile;
+/**
+ * Runs `fn` with fs.accessSync and fs.readFileSync patched.
+ * `existsSet` is the set of paths that "exist" (accessSync succeeds for them).
+ * `pidMap` maps pid-file paths to their string contents.
+ *
+ * NOTE: requireLinux() must be called BEFORE withFsMock so that Node.js's
+ * module loader uses the real fs to read the .js file.
+ */
+async function withFsMock(
+  existsSet: Set<string>,
+  pidMap: Record<string, string>,
+  fn: () => unknown
+): Promise<void> {
+  const origAccess   = fs.accessSync;
+  const origReadFile = fs.readFileSync;
 
-    let callCount = 0;
-    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
-      callCount++;
-      if (callCount === 1) {
-        // isSystemd() probe
-        cb(null, 'systemd 252\n', '');
-      } else {
-        // querySystemd — service is loaded and running
-        cb(null, 'LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=1234\n', '');
-      }
-      return { kill: () => {} };
-    };
+  fs.accessSync = (p: any) => {
+    if (existsSet.has(String(p))) return;
+    const err: any = new Error(`ENOENT: ${p}`);
+    err.code = 'ENOENT';
+    throw err;
+  };
+  (fs as any).readFileSync = (p: any, enc?: any) => {
+    const key = String(p);
+    if (key in pidMap) return pidMap[key];
+    const err: any = new Error(`ENOENT: ${p}`);
+    err.code = 'ENOENT';
+    throw err;
+  };
 
-    try {
-      delete require.cache[require.resolve('../src/linux')];
-      const { serviceExists } = require('../src/linux');
-      const result = await serviceExists('nginx');
-      assert.equal(result, true);
-    } finally {
-      cp.execFile = orig;
-      delete require.cache[require.resolve('../src/linux')];
-    }
+  try {
+    await fn();
+  } finally {
+    fs.accessSync        = origAccess;
+    (fs as any).readFileSync = origReadFile;
+  }
+}
+
+/** Re-require linux module with a fresh cache entry. */
+function requireLinux() {
+  delete require.cache[require.resolve('../src/linux')];
+  return require('../src/linux');
+}
+
+// ─── detectInitSystem ─────────────────────────────────────────────────────────
+
+describe('Linux implementation — detectInitSystem', () => {
+  it('returns systemd when /run/systemd/private exists', async () => {
+    const { detectInitSystem } = requireLinux();
+    await withFsMock(new Set(['/run/systemd/private']), {}, () => {
+      assert.equal(detectInitSystem(), 'systemd');
+    });
   });
 
-  it('returns false for a non-existent systemd service', async () => {
-    const cp = require('child_process');
-    const orig = cp.execFile;
-
-    let callCount = 0;
-    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
-      callCount++;
-      if (callCount === 1) {
-        cb(null, 'systemd 252\n', '');
-      } else {
-        // systemd reports not-found
-        cb(null, 'LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\n', '');
-      }
-      return { kill: () => {} };
-    };
-
-    try {
-      delete require.cache[require.resolve('../src/linux')];
-      const { serviceExists } = require('../src/linux');
-      const result = await serviceExists('doesnotexist');
-      assert.equal(result, false);
-    } finally {
-      cp.execFile = orig;
-      delete require.cache[require.resolve('../src/linux')];
-    }
+  it('returns openrc when /run/openrc/softlevel exists', async () => {
+    const { detectInitSystem } = requireLinux();
+    await withFsMock(new Set(['/run/openrc/softlevel']), {}, () => {
+      assert.equal(detectInitSystem(), 'openrc');
+    });
   });
 
-  it('throws TypeError for invalid serviceName', async () => {
-    delete require.cache[require.resolve('../src/linux')];
-    const { serviceExists } = require('../src/linux');
-    await assert.rejects(() => serviceExists(''), TypeError);
-    await assert.rejects(() => serviceExists(null as any), TypeError);
-    await assert.rejects(() => serviceExists(42 as any), TypeError);
+  it('returns sysv when only /etc/init.d exists', async () => {
+    const { detectInitSystem } = requireLinux();
+    await withFsMock(new Set(['/etc/init.d']), {}, () => {
+      assert.equal(detectInitSystem(), 'sysv');
+    });
   });
 });
 
-describe('Linux implementation — getServiceStatus', () => {
-  it('returns RUNNING status for an active service', async () => {
-    const cp = require('child_process');
-    const orig = cp.execFile;
+// ─── serviceExists — systemd (libsystemd unavailable → SysV fallback) ─────────
 
-    let callCount = 0;
-    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
-      callCount++;
-      if (callCount === 1) {
-        cb(null, 'systemd 252\n', '');
-      } else {
-        cb(null, 'LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=4321\n', '');
+describe('Linux implementation — serviceExists (systemd via libsystemd)', () => {
+  it('returns true when libsystemd unavailable and /etc/init.d/<name> exists (fallback SysV)', async () => {
+    const { serviceExists } = requireLinux();
+    await withFsMock(
+      new Set(['/run/systemd/private', '/etc/init.d/nginx']),
+      {},
+      async () => {
+        const result = await serviceExists('nginx');
+        assert.equal(result, true);
       }
-      return { kill: () => {} };
-    };
-
-    try {
-      delete require.cache[require.resolve('../src/linux')];
-      const { getServiceStatus } = require('../src/linux');
-      const status = await getServiceStatus('sshd');
-      assert.equal(status.name, 'sshd');
-      assert.equal(status.exists, true);
-      assert.equal(status.state, 'RUNNING');
-      assert.equal(status.pid, 4321);
-      assert.equal(status.rawCode, 'active');
-    } finally {
-      cp.execFile = orig;
-      delete require.cache[require.resolve('../src/linux')];
-    }
+    );
   });
 
-  it('returns STOPPED status for an inactive service', async () => {
-    const cp = require('child_process');
-    const orig = cp.execFile;
-
-    let callCount = 0;
-    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
-      callCount++;
-      if (callCount === 1) {
-        cb(null, 'systemd 252\n', '');
-      } else {
-        cb(null, 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nMainPID=0\n', '');
+  it('returns false when libsystemd unavailable and /etc/init.d/<name> absent', async () => {
+    const { serviceExists } = requireLinux();
+    await withFsMock(
+      new Set(['/run/systemd/private']),
+      {},
+      async () => {
+        const result = await serviceExists('doesnotexist');
+        assert.equal(result, false);
       }
-      return { kill: () => {} };
-    };
+    );
+  });
+});
 
-    try {
-      delete require.cache[require.resolve('../src/linux')];
-      const { getServiceStatus } = require('../src/linux');
-      const status = await getServiceStatus('nginx');
-      assert.equal(status.state, 'STOPPED');
-      assert.equal(status.pid, 0);
-    } finally {
-      cp.execFile = orig;
-      delete require.cache[require.resolve('../src/linux')];
-    }
+// ─── serviceExists — OpenRC ───────────────────────────────────────────────────
+
+describe('Linux implementation — serviceExists (OpenRC)', () => {
+  it('returns true when /etc/init.d/<name> exists', async () => {
+    const { serviceExists } = requireLinux();
+    await withFsMock(
+      new Set(['/run/openrc/softlevel', '/etc/init.d/nginx']),
+      {},
+      async () => {
+        assert.equal(await serviceExists('nginx'), true);
+      }
+    );
   });
 
-  it('returns START_PENDING for an activating service', async () => {
-    const cp = require('child_process');
-    const orig = cp.execFile;
-
-    let callCount = 0;
-    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
-      callCount++;
-      if (callCount === 1) {
-        cb(null, 'systemd 252\n', '');
-      } else {
-        cb(null, 'LoadState=loaded\nActiveState=activating\nSubState=start\nMainPID=0\n', '');
+  it('returns false when /etc/init.d/<name> does not exist', async () => {
+    const { serviceExists } = requireLinux();
+    await withFsMock(
+      new Set(['/run/openrc/softlevel']),
+      {},
+      async () => {
+        assert.equal(await serviceExists('ghost'), false);
       }
-      return { kill: () => {} };
-    };
+    );
+  });
+});
 
-    try {
-      delete require.cache[require.resolve('../src/linux')];
-      const { getServiceStatus } = require('../src/linux');
-      const status = await getServiceStatus('myservice');
-      assert.equal(status.state, 'START_PENDING');
-    } finally {
-      cp.execFile = orig;
-      delete require.cache[require.resolve('../src/linux')];
-    }
+// ─── serviceExists — SysV ────────────────────────────────────────────────────
+
+describe('Linux implementation — serviceExists (SysV)', () => {
+  it('returns true when /etc/init.d/<name> exists', async () => {
+    const { serviceExists } = requireLinux();
+    await withFsMock(
+      new Set(['/etc/init.d/cron']),
+      {},
+      async () => {
+        assert.equal(await serviceExists('cron'), true);
+      }
+    );
   });
 
-  it('throws when the service does not exist', async () => {
-    const cp = require('child_process');
-    const orig = cp.execFile;
-
-    let callCount = 0;
-    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
-      callCount++;
-      if (callCount === 1) {
-        cb(null, 'systemd 252\n', '');
-      } else {
-        cb(null, 'LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\n', '');
+  it('returns false when /etc/init.d/<name> does not exist', async () => {
+    const { serviceExists } = requireLinux();
+    await withFsMock(
+      new Set([]),
+      {},
+      async () => {
+        assert.equal(await serviceExists('ghost'), false);
       }
-      return { kill: () => {} };
-    };
+    );
+  });
+});
 
-    try {
-      delete require.cache[require.resolve('../src/linux')];
-      const { getServiceStatus } = require('../src/linux');
-      await assert.rejects(
-        () => getServiceStatus('ghost'),
-        (err: Error) => err.message.includes('does not exist')
-      );
-    } finally {
-      cp.execFile = orig;
-      delete require.cache[require.resolve('../src/linux')];
-    }
+// ─── getServiceStatus — systemd (libsystemd unavailable → SysV fallback) ──────
+
+describe('Linux implementation — getServiceStatus (systemd via libsystemd)', () => {
+  it('RUNNING: /etc/init.d exists and /proc/<pid> exists (fallback SysV)', async () => {
+    const { getServiceStatus } = requireLinux();
+    await withFsMock(
+      new Set(['/run/systemd/private', '/etc/init.d/sshd', '/proc/4321']),
+      { '/var/run/sshd.pid': '4321\n' },
+      async () => {
+        const status = await getServiceStatus('sshd');
+        assert.equal(status.name, 'sshd');
+        assert.equal(status.exists, true);
+        assert.equal(status.state, 'RUNNING');
+        assert.equal(status.pid, 4321);
+      }
+    );
   });
 
-  it('throws TypeError for invalid serviceName', async () => {
-    delete require.cache[require.resolve('../src/linux')];
-    const { getServiceStatus } = require('../src/linux');
+  it('STOPPED: /etc/init.d exists but no pid/proc (fallback SysV)', async () => {
+    const { getServiceStatus } = requireLinux();
+    await withFsMock(
+      new Set(['/run/systemd/private', '/etc/init.d/nginx']),
+      {},
+      async () => {
+        const status = await getServiceStatus('nginx');
+        assert.equal(status.state, 'STOPPED');
+        assert.equal(status.pid, 0);
+      }
+    );
+  });
+
+  it('throws when /etc/init.d/<name> does not exist (fallback SysV)', async () => {
+    const { getServiceStatus } = requireLinux();
+    await withFsMock(
+      new Set(['/run/systemd/private']),
+      {},
+      async () => {
+        await assert.rejects(
+          () => getServiceStatus('ghost'),
+          (err: Error) => err.message.includes('does not exist')
+        );
+      }
+    );
+  });
+});
+
+// ─── getServiceStatus — OpenRC ────────────────────────────────────────────────
+
+describe('Linux implementation — getServiceStatus (OpenRC)', () => {
+  it('RUNNING when /run/openrc/started/<name> exists', async () => {
+    const { getServiceStatus } = requireLinux();
+    await withFsMock(
+      new Set(['/run/openrc/softlevel', '/etc/init.d/nginx', '/run/openrc/started/nginx']),
+      { '/run/nginx.pid': '9999\n' },
+      async () => {
+        const status = await getServiceStatus('nginx');
+        assert.equal(status.state, 'RUNNING');
+        assert.equal(status.pid, 9999);
+      }
+    );
+  });
+
+  it('STOPPED when no openrc state files present', async () => {
+    const { getServiceStatus } = requireLinux();
+    await withFsMock(
+      new Set(['/run/openrc/softlevel', '/etc/init.d/nginx']),
+      {},
+      async () => {
+        const status = await getServiceStatus('nginx');
+        assert.equal(status.state, 'STOPPED');
+        assert.equal(status.pid, 0);
+      }
+    );
+  });
+
+  it('pid read from /run/<name>.pid', async () => {
+    const { getServiceStatus } = requireLinux();
+    await withFsMock(
+      new Set(['/run/openrc/softlevel', '/etc/init.d/sshd', '/run/openrc/started/sshd']),
+      { '/run/sshd.pid': '1234\n' },
+      async () => {
+        const status = await getServiceStatus('sshd');
+        assert.equal(status.pid, 1234);
+      }
+    );
+  });
+});
+
+// ─── getServiceStatus — SysV ──────────────────────────────────────────────────
+
+describe('Linux implementation — getServiceStatus (SysV)', () => {
+  it('RUNNING when /etc/init.d/<name> exists and /proc/<pid> exists', async () => {
+    const { getServiceStatus } = requireLinux();
+    await withFsMock(
+      new Set(['/etc/init.d/cron', '/proc/5678']),
+      { '/var/run/cron.pid': '5678\n' },
+      async () => {
+        const status = await getServiceStatus('cron');
+        assert.equal(status.state, 'RUNNING');
+        assert.equal(status.pid, 5678);
+      }
+    );
+  });
+
+  it('STOPPED when pid=0 and no lock file', async () => {
+    const { getServiceStatus } = requireLinux();
+    await withFsMock(
+      new Set(['/etc/init.d/cron']),
+      {},
+      async () => {
+        const status = await getServiceStatus('cron');
+        assert.equal(status.state, 'STOPPED');
+        assert.equal(status.pid, 0);
+      }
+    );
+  });
+});
+
+// ─── TypeError guards ─────────────────────────────────────────────────────────
+
+describe('Linux implementation — TypeError guards', () => {
+  it('serviceExists("") → TypeError', async () => {
+    const { serviceExists } = requireLinux();
+    await assert.rejects(() => serviceExists(''), TypeError);
+  });
+
+  it('serviceExists(null) → TypeError', async () => {
+    const { serviceExists } = requireLinux();
+    await assert.rejects(() => serviceExists(null as any), TypeError);
+  });
+
+  it('getServiceStatus("") → TypeError', async () => {
+    const { getServiceStatus } = requireLinux();
     await assert.rejects(() => getServiceStatus(''), TypeError);
+  });
+
+  it('getServiceStatus(undefined) → TypeError', async () => {
+    const { getServiceStatus } = requireLinux();
     await assert.rejects(() => getServiceStatus(undefined as any), TypeError);
   });
 });
 
+// ─── index.ts — module contract ───────────────────────────────────────────────
+
 describe('index.ts — module contract', () => {
   it('exports serviceExists and getServiceStatus functions', () => {
-    // On Linux (our CI), the main index loads linux.
     delete require.cache[require.resolve('../index')];
     const api = require('../index');
     assert.equal(typeof api.serviceExists, 'function');

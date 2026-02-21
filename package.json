@@ -1,6 +1,6 @@
 {
   "name": "@ulyssedu45/service_api",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "description": "Cross-platform Node.js library to check Windows/Linux service existence and status via native OS APIs",
   "main": "index.js",
   "types": "index.d.ts",
@@ -20,6 +20,8 @@
     "service",
     "linux",
     "systemd",
+    "openrc",
+    "sysv",
     "scm",
     "winapi",
     "ffi"
