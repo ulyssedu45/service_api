@@ -4,8 +4,12 @@
   "description": "Cross-platform Node.js library to check Windows/Linux service existence and status via native OS APIs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist/"
+  ],
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "pretest": "npm run build",
     "test": "node --test dist/test/service.test.js"
   },
