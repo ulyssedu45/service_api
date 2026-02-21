@@ -2,13 +2,14 @@
 
 /**
  * Linux implementation of service_api.
- * Zero child_process / zero fork — uses three native backends in cascade:
- *   1. systemd  — libsystemd.so.0 via koffi (D-Bus sd_bus)
+ * Uses three native backends in cascade:
+ *   1. systemd  — libsystemd.so.0 via koffi (D-Bus sd_bus), with systemctl CLI fallback
  *   2. OpenRC   — pure filesystem reads (/run/openrc/…)
  *   3. SysV     — /etc/init.d/ + /proc/<pid>
  */
 
 import fs from 'fs';
+import { execSync } from 'child_process';
 import { ServiceStatus } from './types';
 
 // ─── Filesystem helpers ───────────────────────────────────────────────────────
@@ -144,6 +145,33 @@ function queryLibsystemd(serviceName: string): SystemdQueryResult {
   }
 }
 
+// ─── systemd fallback — systemctl CLI ─────────────────────────────────────────
+
+function querySystemctl(serviceName: string): SystemdQueryResult {
+  const unit = serviceName.includes('.') ? serviceName : `${serviceName}.service`;
+  try {
+    const output = execSync(
+      `systemctl show ${unit} --property=LoadState,ActiveState,SubState,MainPID --no-pager`,
+      { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    const props: Record<string, string> = {};
+    for (const line of output.trim().split('\n')) {
+      const idx = line.indexOf('=');
+      if (idx > 0) {
+        props[line.slice(0, idx)] = line.slice(idx + 1);
+      }
+    }
+    return {
+      loadState:   props['LoadState']   || '',
+      activeState: props['ActiveState'] || '',
+      subState:    props['SubState']    || '',
+      mainPid:     parseInt(props['MainPID'] || '0', 10) || 0
+    };
+  } catch {
+    throw new Error(`systemctl query failed for "${serviceName}"`);
+  }
+}
+
 // ─── OpenRC backend ───────────────────────────────────────────────────────────
 
 function openrcExists(serviceName: string): boolean {
@@ -201,7 +229,14 @@ export async function serviceExists(serviceName: string): Promise<boolean> {
         // fall through to SysV
       }
     }
-    // libsystemd unavailable or query failed — fallback to SysV
+    // libsystemd unavailable or query failed — try systemctl CLI
+    try {
+      const { loadState } = querySystemctl(serviceName);
+      if (loadState !== '' && loadState !== 'not-found') return true;
+      // systemctl says not-found — check SysV fallback
+    } catch {
+      // systemctl unavailable — fallback to SysV
+    }
     return sysvExists(serviceName);
   }
 
@@ -234,8 +269,8 @@ export async function getServiceStatus(serviceName: string): Promise<ServiceStat
       try {
         result = queryLibsystemd(serviceName);
       } catch {
-        // libsystemd query failed — fall through to SysV
-        return _sysvStatus(serviceName);
+        // libsystemd query failed — try systemctl CLI
+        return _systemctlStatus(serviceName);
       }
       const { loadState, activeState, mainPid } = result;
       if (loadState === 'not-found' || loadState === '') {
@@ -249,8 +284,8 @@ export async function getServiceStatus(serviceName: string): Promise<ServiceStat
         rawCode: activeState
       };
     }
-    // libsystemd unavailable — fall through to SysV
-    return _sysvStatus(serviceName);
+    // libsystemd unavailable — try systemctl CLI
+    return _systemctlStatus(serviceName);
   }
 
   // ── OpenRC ─────────────────────────────────────────────────────────────────
@@ -284,5 +319,27 @@ function _sysvStatus(serviceName: string): ServiceStatus {
     state:   running ? 'RUNNING' : 'STOPPED',
     pid,
     rawCode: running ? 'active' : 'inactive'
+  };
+}
+
+function _systemctlStatus(serviceName: string): ServiceStatus {
+  let result: SystemdQueryResult;
+  try {
+    result = querySystemctl(serviceName);
+  } catch {
+    // systemctl unavailable — fall through to SysV
+    return _sysvStatus(serviceName);
+  }
+  const { loadState, activeState, mainPid } = result;
+  if (loadState === 'not-found' || loadState === '') {
+    // Service not known to systemd — fall through to SysV
+    return _sysvStatus(serviceName);
+  }
+  return {
+    name:    serviceName,
+    exists:  true,
+    state:   SYSTEMD_STATE_MAP[activeState] || `UNKNOWN(${activeState})`,
+    pid:     mainPid,
+    rawCode: activeState
   };
 }
