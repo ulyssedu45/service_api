@@ -1,17 +1,13 @@
 'use strict';
 
 /**
- * Tests for the Linux implementation (src/linux.js).
+ * Tests for the Linux implementation (src/linux.ts).
  * These tests mock child_process.execFile and fs.promises.access to avoid
  * requiring a real system service manager.
  */
 
-const { describe, it } = require('node:test');
-const assert = require('node:assert/strict');
-
-// ─── We test src/linux.js in isolation ───────────────────────────────────────
-
-
+import { describe, it } from 'node:test';
+import * as assert from 'node:assert/strict';
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -21,7 +17,7 @@ describe('Linux implementation — serviceExists', () => {
     const orig = cp.execFile;
 
     let callCount = 0;
-    cp.execFile = function (cmd, args, opts, cb) {
+    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
       callCount++;
       if (callCount === 1) {
         // isSystemd() probe
@@ -49,7 +45,7 @@ describe('Linux implementation — serviceExists', () => {
     const orig = cp.execFile;
 
     let callCount = 0;
-    cp.execFile = function (cmd, args, opts, cb) {
+    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
       callCount++;
       if (callCount === 1) {
         cb(null, 'systemd 252\n', '');
@@ -75,8 +71,8 @@ describe('Linux implementation — serviceExists', () => {
     delete require.cache[require.resolve('../src/linux')];
     const { serviceExists } = require('../src/linux');
     await assert.rejects(() => serviceExists(''), TypeError);
-    await assert.rejects(() => serviceExists(null), TypeError);
-    await assert.rejects(() => serviceExists(42), TypeError);
+    await assert.rejects(() => serviceExists(null as any), TypeError);
+    await assert.rejects(() => serviceExists(42 as any), TypeError);
   });
 });
 
@@ -86,7 +82,7 @@ describe('Linux implementation — getServiceStatus', () => {
     const orig = cp.execFile;
 
     let callCount = 0;
-    cp.execFile = function (cmd, args, opts, cb) {
+    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
       callCount++;
       if (callCount === 1) {
         cb(null, 'systemd 252\n', '');
@@ -116,7 +112,7 @@ describe('Linux implementation — getServiceStatus', () => {
     const orig = cp.execFile;
 
     let callCount = 0;
-    cp.execFile = function (cmd, args, opts, cb) {
+    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
       callCount++;
       if (callCount === 1) {
         cb(null, 'systemd 252\n', '');
@@ -143,7 +139,7 @@ describe('Linux implementation — getServiceStatus', () => {
     const orig = cp.execFile;
 
     let callCount = 0;
-    cp.execFile = function (cmd, args, opts, cb) {
+    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
       callCount++;
       if (callCount === 1) {
         cb(null, 'systemd 252\n', '');
@@ -169,7 +165,7 @@ describe('Linux implementation — getServiceStatus', () => {
     const orig = cp.execFile;
 
     let callCount = 0;
-    cp.execFile = function (cmd, args, opts, cb) {
+    cp.execFile = function (cmd: string, args: string[], opts: any, cb: Function) {
       callCount++;
       if (callCount === 1) {
         cb(null, 'systemd 252\n', '');
@@ -184,7 +180,7 @@ describe('Linux implementation — getServiceStatus', () => {
       const { getServiceStatus } = require('../src/linux');
       await assert.rejects(
         () => getServiceStatus('ghost'),
-        err => err.message.includes('does not exist')
+        (err: Error) => err.message.includes('does not exist')
       );
     } finally {
       cp.execFile = orig;
@@ -196,13 +192,13 @@ describe('Linux implementation — getServiceStatus', () => {
     delete require.cache[require.resolve('../src/linux')];
     const { getServiceStatus } = require('../src/linux');
     await assert.rejects(() => getServiceStatus(''), TypeError);
-    await assert.rejects(() => getServiceStatus(undefined), TypeError);
+    await assert.rejects(() => getServiceStatus(undefined as any), TypeError);
   });
 });
 
-describe('index.js — module contract', () => {
+describe('index.ts — module contract', () => {
   it('exports serviceExists and getServiceStatus functions', () => {
-    // On Linux (our CI), the main index loads linux.js.
+    // On Linux (our CI), the main index loads linux.
     delete require.cache[require.resolve('../index')];
     const api = require('../index');
     assert.equal(typeof api.serviceExists, 'function');

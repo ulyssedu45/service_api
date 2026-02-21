@@ -6,7 +6,8 @@
  * to call advapi32.dll directly — no PowerShell or sc.exe involved.
  */
 
-const koffi = require('koffi');
+import koffi from 'koffi';
+import { ServiceStatus } from './types';
 
 // ─── Windows API constants ────────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ const ERROR_SERVICE_DOES_NOT_EXIST = 1060;
 // ─── Service state map ────────────────────────────────────────────────────────
 
 /** Maps dwCurrentState values to human-readable strings. */
-const SERVICE_STATES = {
+const SERVICE_STATES: Record<number, string> = {
   1: 'STOPPED',
   2: 'START_PENDING',
   3: 'STOP_PENDING',
@@ -60,8 +61,6 @@ const kernel32  = koffi.load('kernel32');
 
 /**
  * Opens a connection to the service control manager.
- * lpMachineName = null → local machine.
- * lpDatabaseName = null → default SCM database (SERVICES_ACTIVE_DATABASE).
  */
 const OpenSCManagerW = advapi32.func(
   'void *OpenSCManagerW(str16 lpMachineName, str16 lpDatabaseName, uint32 dwDesiredAccess)'
@@ -69,7 +68,6 @@ const OpenSCManagerW = advapi32.func(
 
 /**
  * Opens an existing service object.
- * Returns NULL on failure (use GetLastError for details).
  */
 const OpenServiceW = advapi32.func(
   'void *OpenServiceW(void *hSCManager, str16 lpServiceName, uint32 dwDesiredAccess)'
@@ -77,7 +75,6 @@ const OpenServiceW = advapi32.func(
 
 /**
  * Retrieves the current status of the specified service.
- * InfoLevel must be SC_STATUS_PROCESS_INFO (0).
  */
 const QueryServiceStatusEx = advapi32.func(
   'bool QueryServiceStatusEx(void *hService, int32 InfoLevel, _Out_ SERVICE_STATUS_PROCESS *lpBuffer, uint32 cbBufSize, _Out_ uint32 *pcbBytesNeeded)'
@@ -95,12 +92,8 @@ const GetLastError = kernel32.func('uint32 GetLastError()');
 
 /**
  * Returns true when a koffi pointer value represents a NULL handle.
- * koffi returns null (JS null) for NULL pointers on void * returns.
- *
- * @param {*} handle - Value returned by OpenSCManagerW / OpenServiceW.
- * @returns {boolean}
  */
-function isNullHandle(handle) {
+function isNullHandle(handle: unknown): boolean {
   return handle === null || handle === 0;
 }
 
@@ -109,14 +102,11 @@ function isNullHandle(handle) {
 /**
  * Checks whether a Windows service exists in the SCM database.
  *
- * This function calls the Windows API directly:
- *   OpenSCManagerW → OpenServiceW → CloseServiceHandle (×2)
- *
- * @param {string} serviceName - The short name of the service (e.g. "wuauserv").
- * @returns {Promise<boolean>} Resolves to `true` if the service exists.
- * @throws {Error} If the SCM cannot be opened.
+ * @param serviceName - The short name of the service (e.g. "wuauserv").
+ * @returns Resolves to `true` if the service exists.
+ * @throws If the SCM cannot be opened.
  */
-async function serviceExists(serviceName) {
+export async function serviceExists(serviceName: string): Promise<boolean> {
   if (!serviceName || typeof serviceName !== 'string') {
     throw new TypeError('serviceName must be a non-empty string');
   }
@@ -145,14 +135,11 @@ async function serviceExists(serviceName) {
 /**
  * Returns the current status of a Windows service.
  *
- * This function calls the Windows API directly:
- *   OpenSCManagerW → OpenServiceW → QueryServiceStatusEx → CloseServiceHandle (×2)
- *
- * @param {string} serviceName - The short name of the service (e.g. "wuauserv").
- * @returns {Promise<ServiceStatus>}
- * @throws {Error} If the service does not exist or cannot be queried.
+ * @param serviceName - The short name of the service (e.g. "wuauserv").
+ * @returns The service status.
+ * @throws If the service does not exist or cannot be queried.
  */
-async function getServiceStatus(serviceName) {
+export async function getServiceStatus(serviceName: string): Promise<ServiceStatus> {
   if (!serviceName || typeof serviceName !== 'string') {
     throw new TypeError('serviceName must be a non-empty string');
   }
@@ -173,7 +160,7 @@ async function getServiceStatus(serviceName) {
     }
 
     try {
-      const statusBuf = {};
+      const statusBuf: Record<string, number> = {};
       const bytesNeeded = [0];
       const ok = QueryServiceStatusEx(
         hService,
@@ -202,5 +189,3 @@ async function getServiceStatus(serviceName) {
     CloseServiceHandle(hSCM);
   }
 }
-
-module.exports = { serviceExists, getServiceStatus };

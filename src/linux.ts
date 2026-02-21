@@ -6,27 +6,31 @@
  * the legacy SysV `service` command for non-systemd systems.
  */
 
+import { ServiceStatus } from './types';
+
 /**
- * Thin async wrapper around child_process.execFile that looks up execFile from
- * the module cache on every call.  This keeps the function mockable in tests
- * without having to promisify a captured reference.
- *
- * @param {string}   cmd
- * @param {string[]} args
- * @param {object}   opts
- * @returns {Promise<{stdout: string, stderr: string}>}
+ * Thin async wrapper around child_process.execFile.
  */
-function execFileAsync(cmd, args, opts) {
+function execFileAsync(
+  cmd: string,
+  args: string[],
+  opts: { timeout: number }
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    require('child_process').execFile(cmd, args, opts, (err, stdout, stderr) => {
-      if (err) {
-        err.stdout = stdout;
-        err.stderr = stderr;
-        reject(err);
-      } else {
-        resolve({ stdout: stdout || '', stderr: stderr || '' });
+    require('child_process').execFile(
+      cmd,
+      args,
+      opts,
+      (err: NodeJS.ErrnoException | null, stdout: string, stderr: string) => {
+        if (err) {
+          (err as NodeJS.ErrnoException & { stdout?: string; stderr?: string }).stdout = stdout;
+          (err as NodeJS.ErrnoException & { stdout?: string; stderr?: string }).stderr = stderr;
+          reject(err);
+        } else {
+          resolve({ stdout: stdout || '', stderr: stderr || '' });
+        }
       }
-    });
+    );
   });
 }
 
@@ -36,7 +40,7 @@ function execFileAsync(cmd, args, opts) {
  * Maps systemctl ActiveState values to the canonical state strings used
  * by service_api (mirrors Windows SERVICE_STATES for a consistent API).
  */
-const SYSTEMD_STATE_MAP = {
+const SYSTEMD_STATE_MAP: Record<string, string> = {
   active:       'RUNNING',
   activating:   'START_PENDING',
   deactivating: 'STOP_PENDING',
@@ -49,10 +53,8 @@ const SYSTEMD_STATE_MAP = {
 
 /**
  * Detects whether the current system runs systemd.
- *
- * @returns {Promise<boolean>}
  */
-async function isSystemd() {
+async function isSystemd(): Promise<boolean> {
   try {
     await execFileAsync('systemctl', ['--version'], { timeout: 3000 });
     return true;
@@ -61,14 +63,17 @@ async function isSystemd() {
   }
 }
 
+interface SystemdQueryResult {
+  loadState: string;
+  activeState: string;
+  subState: string;
+  mainPid: number;
+}
+
 /**
  * Queries a service via systemctl (systemd).
- *
- * @param {string} serviceName
- * @returns {Promise<{activeState: string, subState: string, mainPid: number, loadState: string}>}
  */
-async function querySystemd(serviceName) {
-  // --value prints only the property value, one per line; --property restricts output.
+async function querySystemd(serviceName: string): Promise<SystemdQueryResult> {
   const { stdout } = await execFileAsync(
     'systemctl',
     [
@@ -80,7 +85,7 @@ async function querySystemd(serviceName) {
     { timeout: 5000 }
   );
 
-  const props = {};
+  const props: Record<string, string> = {};
   for (const line of stdout.split('\n')) {
     const idx = line.indexOf('=');
     if (idx !== -1) {
@@ -98,16 +103,12 @@ async function querySystemd(serviceName) {
 
 /**
  * Queries a service via the legacy SysV `service` command.
- *
- * @param {string} serviceName
- * @returns {Promise<{running: boolean}>}
  */
-async function querySysV(serviceName) {
+async function querySysV(serviceName: string): Promise<{ running: boolean }> {
   try {
     await execFileAsync('service', [serviceName, 'status'], { timeout: 5000 });
     return { running: true };
-  } catch (err) {
-    // exit code 3 = stopped (LSB convention); anything non-zero = not running
+  } catch {
     return { running: false };
   }
 }
@@ -117,25 +118,24 @@ async function querySysV(serviceName) {
 /**
  * Checks whether a Linux service exists.
  *
- * @param {string} serviceName - The service name (e.g. "nginx", "sshd").
- * @returns {Promise<boolean>} Resolves to `true` if the service is known.
- * @throws {Error} If the service manager cannot be contacted.
+ * @param serviceName - The service name (e.g. "nginx", "sshd").
+ * @returns Resolves to `true` if the service is known.
+ * @throws If the service manager cannot be contacted.
  */
-async function serviceExists(serviceName) {
+export async function serviceExists(serviceName: string): Promise<boolean> {
   if (!serviceName || typeof serviceName !== 'string') {
     throw new TypeError('serviceName must be a non-empty string');
   }
 
   if (await isSystemd()) {
     const { loadState } = await querySystemd(serviceName);
-    // systemd reports "not-found" for unknown unit names.
     return loadState !== 'not-found' && loadState !== '';
   }
 
   // SysV fallback: check if an init script is present.
-  const { access } = require('fs').promises;
+  const { access: fsAccess } = require('fs').promises;
   try {
-    await access(`/etc/init.d/${serviceName}`);
+    await fsAccess(`/etc/init.d/${serviceName}`);
     return true;
   } catch {
     return false;
@@ -145,11 +145,11 @@ async function serviceExists(serviceName) {
 /**
  * Returns the current status of a Linux service.
  *
- * @param {string} serviceName - The service name (e.g. "nginx", "sshd").
- * @returns {Promise<ServiceStatus>}
- * @throws {Error} If the service does not exist or cannot be queried.
+ * @param serviceName - The service name (e.g. "nginx", "sshd").
+ * @returns The service status.
+ * @throws If the service does not exist or cannot be queried.
  */
-async function getServiceStatus(serviceName) {
+export async function getServiceStatus(serviceName: string): Promise<ServiceStatus> {
   if (!serviceName || typeof serviceName !== 'string') {
     throw new TypeError('serviceName must be a non-empty string');
   }
@@ -187,5 +187,3 @@ async function getServiceStatus(serviceName) {
     rawCode: running ? 'active' : 'inactive'
   };
 }
-
-module.exports = { serviceExists, getServiceStatus };
