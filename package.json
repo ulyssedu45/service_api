@@ -1,0 +1,34 @@
+{
+  "name": "service_api",
+  "version": "1.0.0",
+  "description": "Cross-platform Node.js library to check Windows/Linux service existence and status via native OS APIs",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test test/service.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ulyssedu45/service_api.git"
+  },
+  "keywords": [
+    "windows",
+    "service",
+    "linux",
+    "systemd",
+    "scm",
+    "winapi",
+    "ffi"
+  ],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "bugs": {
+    "url": "https://github.com/ulyssedu45/service_api/issues"
+  },
+  "homepage": "https://github.com/ulyssedu45/service_api#readme",
+  "dependencies": {
+    "koffi": "^2.15.1"
+  }
+}
