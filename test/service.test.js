@@ -6,54 +6,12 @@
  * requiring a real system service manager.
  */
 
-const { describe, it, before, afterEach, mock } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 // ─── We test src/linux.js in isolation ───────────────────────────────────────
 
-// Ensure the module is loaded fresh for each test block by clearing the cache.
-function freshLinux() {
-  // Clear the cached module and its child_process dependency so mocks apply.
-  Object.keys(require.cache).forEach(k => {
-    if (k.includes('src/linux') || k.includes('src\\linux')) {
-      delete require.cache[k];
-    }
-  });
-  return require('../src/linux');
-}
 
-// ─── Helpers to build fake execFile ──────────────────────────────────────────
-
-/**
- * Installs a mock for child_process.execFile (and its promisified variant).
- * Returns an object whose `resolve` / `reject` properties can be replaced to
- * control the next call.
- */
-function mockExecFile(responses) {
-  // responses: Array<{stdout?, stderr?, error?}>
-  let callIndex = 0;
-
-  const { execFile } = require('child_process');
-  const childProcess = require('child_process');
-
-  // Replace execFile with a version that calls our fake async handler
-  childProcess.execFile = function fakeExecFile(cmd, args, opts, cb) {
-    const res = responses[callIndex] || responses[responses.length - 1];
-    callIndex++;
-    if (res.error) {
-      cb(res.error, res.stdout || '', res.stderr || '');
-    } else {
-      cb(null, res.stdout || '', res.stderr || '');
-    }
-    return { kill: () => {} };
-  };
-
-  return {
-    restore() {
-      childProcess.execFile = execFile;
-    }
-  };
-}
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
