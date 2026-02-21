@@ -7,7 +7,7 @@ Cross-platform Node.js library to **check the existence and status of OS service
 | Platform    | Backend                                                                                                                                                        |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Windows** | `advapi32.dll` — calls the Windows Service Control Manager (SCM) directly via [koffi](https://koffi.dev/) FFI bindings. No PowerShell, no `sc.exe`.            |
-| **Linux**   | Auto-detected native backend — **zero `child_process`**, zero fork. See table below.                                                                           |
+| **Linux**   | Auto-detected native backend. See table below.                                                                                                                 |
 
 ---
 
@@ -105,17 +105,6 @@ for (const s of results) {
 }
 ```
 
-### Runnable demo
-
-```bash
-# Uses a sensible default service for the current OS
-node examples/check-service.js
-
-# Pass any service name as an argument
-node examples/check-service.js nginx      # Linux
-node examples/check-service.js spooler   # Windows
-```
-
 ---
 
 ## API
@@ -157,13 +146,13 @@ Returns a `ServiceStatus` object:
 
 ## How it works on Linux
 
-The Linux backend is selected automatically at runtime — **no `child_process`, no `systemctl`, no fork** of any kind.
+The Linux backend is selected automatically at runtime.
 
-| Init system | Distros                                    | Detection                         | API used                                   |
-| ----------- | ------------------------------------------ | ---------------------------------- | ------------------------------------------ |
-| **systemd** | Ubuntu, Debian, Fedora, RHEL, Arch, SUSE… | `/run/systemd/private` exists      | `libsystemd.so.0` via koffi (sd_bus D-Bus) |
-| **OpenRC**  | Alpine, Gentoo, Artix…                     | `/run/openrc/softlevel` exists     | `/run/openrc/started/` filesystem reads    |
-| **SysV**    | legacy Debian, RHEL 6, embedded…           | `/etc/init.d/` exists              | `/etc/init.d/` + `/proc/<pid>` reads       |
+| Init system | Distros                                    | Detection                         | API used                                                                    |
+| ----------- | ------------------------------------------ | ---------------------------------- | --------------------------------------------------------------------------- |
+| **systemd** | Ubuntu, Debian, Fedora, RHEL, Arch, SUSE… | `/run/systemd/private` exists      | `libsystemd.so.0` via koffi (sd_bus D-Bus), with `systemctl` CLI fallback  |
+| **OpenRC**  | Alpine, Gentoo, Artix…                     | `/run/openrc/softlevel` exists     | `/run/openrc/started/` filesystem reads                                     |
+| **SysV**    | legacy Debian, RHEL 6, embedded…           | `/etc/init.d/` exists              | `/etc/init.d/` + `/proc/<pid>` reads                                        |
 
 ### systemd backend (koffi + libsystemd)
 
@@ -173,7 +162,7 @@ Uses [koffi](https://koffi.dev/) to call `libsystemd.so.0` directly — the same
 2. **`sd_bus_get_property_string`** — reads `LoadState`, `ActiveState`, `SubState`, `MainPID` from the `org.freedesktop.systemd1.Unit` D-Bus interface.
 3. **`sd_bus_unref`** — releases the bus connection.
 
-If `libsystemd.so.0` is not available (containers, musl builds without systemd), the backend falls back silently to SysV-style checks via `/proc`.
+If `libsystemd.so.0` is not available (containers, musl builds without systemd), the backend falls back to `systemctl show` CLI parsing, then to SysV-style checks via `/proc`.
 
 ### OpenRC backend (Alpine, Gentoo)
 
